@@ -38,7 +38,7 @@ class TaskTableModel(QtCore.QAbstractTableModel):
     '''
     updateTotalProgress = QtCore.pyqtSignal(float)
     updateTimeLeft = QtCore.pyqtSignal(float)
-    stopTask = QtCore.pyqtSignal()
+    pauseTask = QtCore.pyqtSignal()
     startTask = QtCore.pyqtSignal()
     tasksFinished = QtCore.pyqtSignal()
     def __init__(self, parent = None, plotter = None):
@@ -46,7 +46,7 @@ class TaskTableModel(QtCore.QAbstractTableModel):
         self.taskList = []                  
         self.currentTask = 0
         self.isRunning = False
-        self.isStopped = False
+        self.isPaused = False
         self.isFinished = False
         self.headerNames = ["Icon", "Task Name", "Loops", "Progress", "Time [hh:mm:ss]", "Status"]       
         self.plotter = plotter                       
@@ -71,8 +71,8 @@ class TaskTableModel(QtCore.QAbstractTableModel):
             elif index.column() == 5:   
                 if task.isRunning:
                     return "running %d of %d"%(task.loopCounter, task.loops)
-                elif task.isStopped:
-                    return "stopped %d of %d"%(task.loopCounter, task.loops)
+                elif task.isPaused:
+                    return "paused %d of %d"%(task.loopCounter, task.loops)
                 elif task.isFinished:
                     if task.loops == 0:
                         return "skipped"
@@ -171,7 +171,7 @@ class TaskTableModel(QtCore.QAbstractTableModel):
             
     def start(self):
         self.isRunning = True    
-        self.isStopped = False
+        self.isPaused = False
         if self.currentTask < len(self.taskList):
             if self.isFinished:
                 self.isFinished = False
@@ -213,7 +213,7 @@ class TaskTableModel(QtCore.QAbstractTableModel):
                 self.plotter.clearData()
                 self.taskList[self.currentTask].start()
             else:
-                self.isStopped = True
+                self.isPaused = True
                 self.isRunning = False
                 self.taskList[self.currentTask].finished.connect(self.startNext)
                 self.taskList[self.currentTask].updateProgress.connect(self.updateTask)
@@ -224,17 +224,17 @@ class TaskTableModel(QtCore.QAbstractTableModel):
             self.finish()
             
                 
-    def stop(self):  
+    def pause(self):  
 #        print self.currentTask
-        self.isStopped = True
+        self.isPaused = True
         self.isRunning = False
         if self.currentTask < len(self.taskList):
-            self.taskList[self.currentTask].stop()        
+            self.taskList[self.currentTask].pause()        
         
 
     def finish(self):
         self.isRunning = False
-        self.isStopped = False
+        self.isPaused = False
         self.isFinished = True
         self.tasksFinished.emit()     
         logging.getLogger('').info("All tasks finished")  
@@ -314,7 +314,10 @@ class NumberFormatDelegate(QtGui.QStyledItemDelegate):
         try:
            value = int(value)
         except ValueError:
-           value = float(value)
+            try:
+                value = float(value)
+            except ValueError:
+                value = None
         model.setData(index, value, QtCore.Qt.EditRole)
 #
     def updateEditorGeometry(self, editor, option, index):
@@ -330,12 +333,12 @@ class ConfigRegionsModel(QtCore.QAbstractTableModel):
 
     def change(self, taskType, newTask):
         if newTask:
-#            self.task = eval(taskType)
+            # class only
             self.task = taskType
-#            self.regions = getargspec(self.task.__init__)[3][2] # default will be changed
-            self.regions = [list(v) for v in getargspec(self.task.__init__)[3][2][:]]# default will be preserved
+            self.regions = [list(v) for v in getargspec(self.task.__init__)[3][2][:]]
             self.regionsNames = self.task.regionsNames[:]
         elif taskType != None:
+            # edit task
             self.task = taskType
             self.regions = self.task.regions
             self.regionsNames = self.task.regionsNames[:]
@@ -353,8 +356,8 @@ class ConfigRegionsModel(QtCore.QAbstractTableModel):
     
     def data(self, index, role):
         if role == QtCore.Qt.DisplayRole:  
-            if index.column() < len(self.regions[index.row()]):
-                return self.regions[index.row()][index.column()]
+#            if index.column() < len(self.regions[index.row()]):
+            return self.regions[index.row()][index.column()]
 
     def headerData(self, sect, orient, role):
         if (role == QtCore.Qt.DisplayRole) and (orient == QtCore.Qt.Horizontal):
@@ -362,14 +365,19 @@ class ConfigRegionsModel(QtCore.QAbstractTableModel):
     
     def setData(self, index, value, role):
         if role == QtCore.Qt.EditRole:
-            if index.column() < len(self.regions[index.row()]):
-                self.regions[index.row()][index.column()] = value
-                self.dataChanged.emit(index, index) 
-                if not isclass(self.task):
-                    self.task.recalculate()
-                return True
+#            if index.column() < len(self.regions[index.row()]):
+            self.regions[index.row()][index.column()] = value            
+            if not isclass(self.task):
+                self.task.recalculate()
+#            self.dataChanged.emit(index, index) 
+            self.layoutChanged.emit()
+            return True
         return False   
 
+    def addEmptyRegion(self):
+        self.regions.append([None]*len(self.regionsNames))
+        self.layoutChanged.emit()
+        
     def flags(self, index):
         if isclass(self.task):
             return QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsEditable
@@ -452,8 +460,9 @@ class TaskConfig(QtGui.QWidget):
         self.logicModel = ConfigLogicModel()
         self.regionsTable.setModel(self.regionsModel)
         self.logicList.setModel(self.logicModel) 
+        self.btnAddRegion = QtGui.QPushButton("Add Region")
         self.setupLayout() 
-#        self.adjustSize()         
+        self.btnAddRegion.clicked.connect(self.regionsModel.addEmptyRegion)       
         
     def setupLayout(self):
         self.layout = QtGui.QGridLayout()
@@ -463,8 +472,9 @@ class TaskConfig(QtGui.QWidget):
         label2 = QtGui.QLabel("Regions")
         self.layout.addWidget(label1, 0, 0)
         self.layout.addWidget(label2, 0, 1)
-        self.layout.addWidget(self.logicList, 1, 0)
+        self.layout.addWidget(self.logicList, 1, 0, 2, 1)
         self.layout.addWidget(self.regionsTable, 1, 1)       
+        self.layout.addWidget(self.btnAddRegion, 2, 1)  
         self.setLayout(self.layout)
                     
         
@@ -500,7 +510,7 @@ class MainW(QtGui.QWidget):
     def setupLayout(self):
                 
         self.plotter = MonitorWidget()
-        self.plotter.setSizePolicy(QtGui.QSizePolicy(QtGui.QSizePolicy.Minimum, QtGui.QSizePolicy.Minimum))        
+        self.plotter.setSizePolicy(QtGui.QSizePolicy(QtGui.QSizePolicy.MinimumExpanding, QtGui.QSizePolicy.MinimumExpanding))        
         self.ttModel = TaskTableModel(plotter = self.plotter)        
         self.ttView = QtGui.QTableView()
         self.ttView.setItemDelegateForColumn(PROGRESS_COLUMN_INDEX, ProgressDelegate(self.ttView))
@@ -512,8 +522,9 @@ class MainW(QtGui.QWidget):
         self.ttView.setModel(self.ttModel)
         self.ttView.selectionModel().selectionChanged.connect(self.configureTask)
         
+        self.statusLayout = QtGui.QHBoxLayout()
         self.totalBar = floatProgressBar()  
-        self.totalBar.setSizePolicy(QtGui.QSizePolicy(QtGui.QSizePolicy.Minimum, QtGui.QSizePolicy.Minimum))     
+        self.totalBar.setSizePolicy(QtGui.QSizePolicy(QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Minimum))     
         self.timeLeftLabel = QtGui.QLabel("Time left:")
         self.timeLeftLabel.setSizePolicy(QtGui.QSizePolicy(QtGui.QSizePolicy.Maximum, QtGui.QSizePolicy.Maximum))
         self.timeLeftValue = QtGui.QLabel("--:--:--")
@@ -527,7 +538,7 @@ class MainW(QtGui.QWidget):
            
         
         self.btnStart = QtGui.QPushButton("Start")
-        self.btnStop = QtGui.QPushButton("Stop")
+        self.btnPause = QtGui.QPushButton("Pause")
         self.btnAdd = QtGui.QPushButton("Add")
         self.btnCopy = QtGui.QPushButton("Copy")
         self.btnRemove = QtGui.QPushButton("Remove")
@@ -538,7 +549,7 @@ class MainW(QtGui.QWidget):
         self.btnLayout.addWidget(self.btnRemove)
         self.btnLayout.addWidget(self.btnClear)
         self.btnLayout.addWidget(self.btnStart)
-        self.btnLayout.addWidget(self.btnStop)
+        self.btnLayout.addWidget(self.btnPause)
         
         self.btnClear.setDisabled(True)
 #        self.btnRemove.setDisabled(True)
@@ -546,18 +557,19 @@ class MainW(QtGui.QWidget):
         
         self.layout = QtGui.QGridLayout()
         self.layout.addLayout(self.btnLayout, 0, 0)
-        self.layout.addWidget(self.plotter, 0, 1, 4, 3)
+        self.layout.addWidget(self.plotter, 0, 1, 4, 1)
         self.layout.addWidget(self.ttView, 1, 0)
         self.layout.addWidget(self.configLabel, 2, 0)
         self.layout.addWidget(self.config, 3, 0)
-        self.layout.addWidget(self.totalBar, 4, 0, 1, 2)     
-        self.layout.addWidget(self.timeLeftLabel, 4, 2)   
-        self.layout.addWidget(self.timeLeftValue, 4, 3)   
+        self.statusLayout.addWidget(self.totalBar)     
+        self.statusLayout.addWidget(self.timeLeftLabel)   
+        self.statusLayout.addWidget(self.timeLeftValue)   
+        self.layout.addLayout(self.statusLayout, 4, 0, 1, 2)
         self.setLayout(self.layout) 
                
     def setupConnections(self):
         self.btnStart.clicked.connect(self.start) 
-        self.btnStop.clicked.connect(self.stop)
+        self.btnPause.clicked.connect(self.pause)
         self.btnRemove.clicked.connect(self.removeTask)
         self.btnCopy.clicked.connect(self.copyTask)
         self.btnAdd.clicked.connect(self.startWizard)
@@ -572,19 +584,20 @@ class MainW(QtGui.QWidget):
         self.ttModel.start()
         self.setupButtons()        
     
-    def stop(self):    
-        self.ttModel.stop()
+    def pause(self):    
+        self.ttModel.pause()
         self.setupButtons()
     
     def setupButtons(self):
-#        print self.ttModel.isRunning, self.ttModel.isStopped, self.ttModel.isFinished
+#        print self.ttModel.isRunning, self.ttModel.isPaused, self.ttModel.isFinished
 #        print self.selected, self.ttModel.currentTask
 
         if self.ttModel.isRunning:
             # Process is running
             self.btnStart.setText("Running...")
             self.btnStart.setDisabled(True)
-            self.btnStop.setEnabled(True)
+            self.btnPause.setText("Pause")
+            self.btnPause.setEnabled(True)
             if self.selected == -1:
                 self.btnCopy.setDisabled(True)
             else:
@@ -594,11 +607,12 @@ class MainW(QtGui.QWidget):
             else:
                 self.btnRemove.setEnabled(True)
                 
-        elif self.ttModel.isStopped:   
-            # Process is stopped
+        elif self.ttModel.isPaused:   
+            # Process is paused
             self.btnStart.setText("Continue")
             self.btnStart.setEnabled(True)
-            self.btnStop.setDisabled(True)
+            self.btnPause.setText("Paused")
+            self.btnPause.setDisabled(True)
             if self.selected == -1:
                 self.btnCopy.setDisabled(True)
             else:
@@ -612,7 +626,7 @@ class MainW(QtGui.QWidget):
             # There are no tasks
             self.btnStart.setText("Start")
             self.btnStart.setDisabled(True)
-            self.btnStop.setDisabled(True)
+            self.btnPause.setDisabled(True)
             self.btnRemove.setDisabled(True)
             self.btnCopy.setDisabled(True)
             self.config.logicModel.change(taskType = None, newTask = False)
@@ -622,7 +636,7 @@ class MainW(QtGui.QWidget):
             # All tasks finished
             self.btnStart.setText("Start")
             self.btnStart.setEnabled(True)
-            self.btnStop.setDisabled(True)
+            self.btnPause.setDisabled(True)
             if self.selected == -1:
                 self.btnRemove.setDisabled(True)
                 self.btnCopy.setDisabled(True)
@@ -634,7 +648,7 @@ class MainW(QtGui.QWidget):
             # There are tasks, waiting for start
             self.btnStart.setText("Start")
             self.btnStart.setEnabled(True)
-            self.btnStop.setDisabled(True)
+            self.btnPause.setDisabled(True)
             if self.selected == -1:
                 self.btnRemove.setDisabled(True)
                 self.btnCopy.setDisabled(True)

@@ -9,7 +9,7 @@ class DummyGaussScanTaskWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal()  
     def __init__(self, parent = None):
         QtCore.QObject.__init__(self, parent)  
-        self.stopFlag = False
+        self.pauseFlag = False
         self.tppList = []
         self.posList = []
     
@@ -20,7 +20,7 @@ class DummyGaussScanTaskWorker(QtCore.QObject):
         c = 0.5*(self.posList[0] + self.posList[-1])
         w = 0.05*(self.posList[-1] - self.posList[0])
         for i in range(len(self.posList)):
-            while self.stopFlag:
+            while self.pauseFlag:
                 #waiting 
                 sleep(0.001)                                                  
             # work 
@@ -30,17 +30,17 @@ class DummyGaussScanTaskWorker(QtCore.QObject):
         self.finished.emit()
     
     @QtCore.pyqtSlot()    
-    def stop(self):
-        self.stopFlag = True 
+    def pause(self):
+        self.pauseFlag = True 
     
     @QtCore.pyqtSlot()      
     def resume(self):
-        self.stopFlag = False 
+        self.pauseFlag = False 
         
         
 class DummyGaussScanTask(QtCore.QObject):
     taskName = "Dummy Scan"
-    regionsNames = ["Start[mm]", "Stop[mm]", "Step[mm]", "Time[s]"]
+    regionsNames = ["Start[mm]", "Step[mm]", "Time[s]"]
 #    logicNames = ["AutoStart", "Use NEXUS", "Use Encoder", "Use Imagination", "Long Name Boolean Parameter"]
     '''
     A class for doing a Task
@@ -52,17 +52,13 @@ class DummyGaussScanTask(QtCore.QObject):
     finished = QtCore.pyqtSignal()
     isEditable = True
     def __init__(self, name=None, parent = None, 
-                 regions = [[100, 200, 2, 0.05],
-                            [200, 301, 2, 0.05]],
-                 logic = {"Autostart" : True,
-                          "Use NEXUS" : False, 
-                          "Use Encoder" : False, 
-                          "Use Imagination" : True, 
-                          "Long Name Boolean Parameter" : False
+                 regions = [[100, 2, 0.05],
+                            [200, None, None]],
+                 logic = {"Autostart" : True           
                           }):
         QtCore.QObject.__init__(self, parent)
         self.name = name
-        self.regions = regions
+        self.regions = [list(v) for v in regions]
         self.logic = logic    
         
         self.loops = 1
@@ -72,7 +68,7 @@ class DummyGaussScanTask(QtCore.QObject):
 
         
         self.isRunning = False
-        self.isStopped = False 
+        self.isPaused = False 
         self.isFinished = False  
         self.isEditable = True        
         
@@ -83,8 +79,7 @@ class DummyGaussScanTask(QtCore.QObject):
         self.taskWorker.finished.connect(self.taskThread.quit)
         self.taskThread.finished.connect(self.finish)
         self.taskWorker.updateData.connect(self.update)
-        
-#       
+              
         logging.getLogger('').debug(self.taskName + " <" + self.name + "> created")
         self.recalculate()
 
@@ -92,10 +87,16 @@ class DummyGaussScanTask(QtCore.QObject):
     def recalculate(self):
         self.posList = np.array([])
         self.tppList = np.array([])
-        for r in self.regions:
-            reg = np.arange(r[0], r[1], r[2])
-            self.posList = np.concatenate([self.posList, reg])
-            self.tppList = np.concatenate([self.tppList, [r[3]]*len(reg)])                        
+        self.empty = []
+        for i, r in enumerate(self.regions):
+            if r.count(None) == 3:
+                self.empty += [i]
+            elif r.count(None) == 0:
+                reg = np.arange(r[0], self.regions[i+1][0], r[1])
+                self.posList = np.concatenate([self.posList, reg])
+                self.tppList = np.concatenate([self.tppList, [r[2]]*len(reg)]) 
+        for i in sorted(self.empty, reverse = True):
+            del self.regions[i]                     
         self.stepsTotal = len(self.posList) 
         self.time4loop = sum(self.tppList)
         self.timeTotal = self.time4loop*self.loops  
@@ -110,7 +111,7 @@ class DummyGaussScanTask(QtCore.QObject):
             
     def start(self):        
         if self.loops > 0:
-            if self.isStopped: 
+            if self.isPaused: 
                 # Resume
                 QtCore.QMetaObject.invokeMethod(self.taskWorker, "resume", QtCore.Qt.DirectConnection)
                 logging.getLogger('').info(self.taskName + " <" + self.name + "> resumed")
@@ -124,13 +125,13 @@ class DummyGaussScanTask(QtCore.QObject):
                 self.taskThread.start()
                 logging.getLogger('').info(self.taskName + " <" + self.name + "> (%d/%d) started"%(self.loopCounter, self.loops) )  
                 
-            self.isStopped = False
+            self.isPaused = False
             self.isRunning = True
         else:
             print self.name + " skipped" 
             self.progress = 100.
             self.timeTotal = 0.
-            self.isStopped = False
+            self.isPaused = False
             self.isRunning = False
             self.isFinished = True
             self.finished.emit()
@@ -138,7 +139,7 @@ class DummyGaussScanTask(QtCore.QObject):
     def setLoops(self, value): 
         if value > self.loopCounter:            
             self.loops = value
-        elif self.isRunning or self.isStopped:
+        elif self.isRunning or self.isPaused:
             self.loops = self.loopCounter
         else:
             self.loops = value
@@ -146,15 +147,15 @@ class DummyGaussScanTask(QtCore.QObject):
 #            self.loops = value
         self.recalculate() 
         
-    def stop(self):
+    def pause(self):
         # using DirectConnection to invoke a method in another thread
         # note sure how safe it is but it works
         # SLOT should be seen in QT META OBJECT SPACE 
         # therefore, @QtCore.pyqtSlot() macro should be used on the method
-        QtCore.QMetaObject.invokeMethod(self.taskWorker, "stop", QtCore.Qt.DirectConnection)
-        self.isStopped = True
+        QtCore.QMetaObject.invokeMethod(self.taskWorker, "pause", QtCore.Qt.DirectConnection)
+        self.isPaused = True
         self.isRunning = False
-        logging.getLogger('').debug(self.taskName + " <" + self.name + "> stopped")
+        logging.getLogger('').debug(self.taskName + " <" + self.name + "> paused")
     
     def update(self, i, v):    
         self.currentPoint = i
@@ -167,7 +168,7 @@ class DummyGaussScanTask(QtCore.QObject):
         if self.loopCounter < self.loops:
             self.start()
         else: 
-            self.isStopped = False
+            self.isPaused = False
             self.isRunning = False
             self.isFinished = True
             self.isEditable = True
@@ -193,7 +194,7 @@ class DummyEXAFSScanTaskWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal()  
     def __init__(self, parent = None):
         QtCore.QObject.__init__(self, parent)  
-        self.stopFlag = False
+        self.pauseFlag = False
         self.tppList = []
         self.posList = []
         self.e0 = 8979.
@@ -207,7 +208,7 @@ class DummyEXAFSScanTaskWorker(QtCore.QObject):
    
     def process(self):
         for i in range(len(self.posList)):
-            while self.stopFlag:
+            while self.pauseFlag:
                 #waiting 
                 sleep(0.001)                                                  
             # work 
@@ -217,12 +218,12 @@ class DummyEXAFSScanTaskWorker(QtCore.QObject):
         self.finished.emit()
     
     @QtCore.pyqtSlot()    
-    def stop(self):
-        self.stopFlag = True 
+    def pause(self):
+        self.pauseFlag = True 
     
     @QtCore.pyqtSlot()      
     def resume(self):
-        self.stopFlag = False 
+        self.pauseFlag = False 
         
         
 class DummyEXAFSTask(QtCore.QObject):
@@ -239,17 +240,14 @@ class DummyEXAFSTask(QtCore.QObject):
     finished = QtCore.pyqtSignal()
     isEditable = True
     def __init__(self, name=None, parent=None, 
-                 regions = [[8979, -200, 10, 0.05], 
-                            [8979, -50, 1, 0.05], 
-                            [8979, -30, 0.2, 0.05], 
-                            [8979, 50, 1, 0.05],                            
+                 regions = [[8979, -200, 10, 0.05, None], 
+                            [8979, -50, 1, 0.05, None], 
+                            [8979, -30, 0.2, 0.05, None], 
+                            [8979, 50, 1, 0.05, None],                            
                             [8979, 100, 0.05, 0.05, 1], 
-                            [8979, 500]], 
+                            [8979, 500, None, None, None]], 
                  logic = {"Autostart" : True,
-                          "Use NEXUS" : False, 
-                          "Use Encoder" : False, 
-                          "Use Imagination" : True, 
-                          "Long Name Boolean Parameter" : False
+                          "Move Parallel" : False
                           }):
         QtCore.QObject.__init__(self, parent)
         self.name = name
@@ -262,7 +260,7 @@ class DummyEXAFSTask(QtCore.QObject):
         self.currentPoint = 0
         
         self.isRunning = False
-        self.isStopped = False 
+        self.isPaused = False 
         self.isFinished = False  
         self.isEditable = True        
         
@@ -282,11 +280,14 @@ class DummyEXAFSTask(QtCore.QObject):
         self.posList = np.array([])
         self.tppList = np.array([])
         for i, r in enumerate(self.regions):
-            if len(r) == 4:
+            if r.count(None) == 3:
+                del self.regions[i]
+                continue
+            elif r.count(None) == 1:
                 newE = np.arange(r[1] + r[0], self.regions[i+1][1] + self.regions[i+1][0], r[2])
                 self.posList = np.concatenate([self.posList, newE])
                 self.tppList = np.concatenate([self.tppList, [r[3]]*len(newE)])    
-            elif len(r) == 5:    
+            elif r.count(None) == 0:    
                 newk = np.arange(etok(r[1]), etok(self.regions[i+1][1]), r[2])
                 newE = ktoe(newk) + r[0]
                 self.posList = np.concatenate([self.posList, newE])
@@ -306,7 +307,7 @@ class DummyEXAFSTask(QtCore.QObject):
             
     def start(self):        
         if self.loops > 0:
-            if self.isStopped: 
+            if self.isPaused: 
                 # Resume
                 QtCore.QMetaObject.invokeMethod(self.taskWorker, "resume", QtCore.Qt.DirectConnection)
                 logging.getLogger('').debug(self.taskName + " <" + self.name + "> resumed")
@@ -320,13 +321,13 @@ class DummyEXAFSTask(QtCore.QObject):
                 self.taskThread.start()
                 logging.getLogger('').info(self.taskName + " <" + self.name + "> (%d/%d) started"%(self.loopCounter, self.loops) ) 
                 
-            self.isStopped = False
+            self.isPaused = False
             self.isRunning = True
         else:
             print self.name + " skipped" 
             self.progress = 100.
             self.timeTotal = 0.
-            self.isStopped = False
+            self.isPaused = False
             self.isRunning = False
             self.isFinished = True
             self.finished.emit()
@@ -334,7 +335,7 @@ class DummyEXAFSTask(QtCore.QObject):
     def setLoops(self, value): 
         if value > self.loopCounter:            
             self.loops = value
-        elif self.isRunning or self.isStopped:
+        elif self.isRunning or self.isPaused:
             self.loops = self.loopCounter
         else:
             self.loops = value
@@ -342,15 +343,15 @@ class DummyEXAFSTask(QtCore.QObject):
 #            self.loops = value
         self.recalculate() 
         
-    def stop(self):
+    def pause(self):
         # using DirectConnection to invoke a method in another thread
         # note sure how safe it is but it works
         # SLOT should be seen in QT META OBJECT SPACE 
         # therefore, @QtCore.pyqtSlot() macro should be used on the method
-        QtCore.QMetaObject.invokeMethod(self.taskWorker, "stop", QtCore.Qt.DirectConnection)
-        self.isStopped = True
+        QtCore.QMetaObject.invokeMethod(self.taskWorker, "pause", QtCore.Qt.DirectConnection)
+        self.isPaused = True
         self.isRunning = False
-        logging.getLogger('').debug(self.taskName + " <" + self.name + "> stopped")
+        logging.getLogger('').debug(self.taskName + " <" + self.name + "> paused")
     
     def update(self, i, v):    
         self.currentPoint = i
@@ -363,7 +364,7 @@ class DummyEXAFSTask(QtCore.QObject):
             self.start()
         else:
             logging.getLogger('').info(self.taskName + " <" + self.name + "> (%d/%d) finished"%(self.loopCounter, self.loops) )        
-            self.isStopped = False
+            self.isPaused = False
             self.isRunning = False
             self.isFinished = True
             self.isEditable = True
