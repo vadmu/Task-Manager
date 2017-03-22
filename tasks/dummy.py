@@ -1,7 +1,7 @@
 from PyQt4 import QtCore
-#from random import randint
 from time import sleep
 import numpy as np
+import logging
 
 
 class DummyGaussScanTaskWorker(QtCore.QObject):
@@ -39,7 +39,7 @@ class DummyGaussScanTaskWorker(QtCore.QObject):
         
         
 class DummyGaussScanTask(QtCore.QObject):
-    taskName = "Dummy Gauss Scan"
+    taskName = "Dummy Scan"
     regionsNames = ["Start[mm]", "Stop[mm]", "Step[mm]", "Time[s]"]
 #    logicNames = ["AutoStart", "Use NEXUS", "Use Encoder", "Use Imagination", "Long Name Boolean Parameter"]
     '''
@@ -47,7 +47,7 @@ class DummyGaussScanTask(QtCore.QObject):
     It has a worker that runs in a separate thread
     '''
     updateProgress = QtCore.pyqtSignal(float)
-    updateData = QtCore.pyqtSignal(float, float)
+    updateData = QtCore.pyqtSignal(list)
     clearData = QtCore.pyqtSignal()
     finished = QtCore.pyqtSignal()
     isEditable = True
@@ -84,7 +84,8 @@ class DummyGaussScanTask(QtCore.QObject):
         self.taskThread.finished.connect(self.finish)
         self.taskWorker.updateData.connect(self.update)
         
-        print self.name + " created"
+#       
+        logging.getLogger('').debug(self.taskName + " <" + self.name + "> created")
         self.recalculate()
 
     
@@ -97,14 +98,14 @@ class DummyGaussScanTask(QtCore.QObject):
             self.tppList = np.concatenate([self.tppList, [r[3]]*len(reg)])                        
         self.stepsTotal = len(self.posList) 
         self.time4loop = sum(self.tppList)
-        print self.posList
-        print self.tppList
         self.timeTotal = self.time4loop*self.loops  
         if self.timeTotal != 0 and self.loopCounter != 0:
             self.progress = 100.*(sum(self.tppList[:self.currentPoint+1]) + self.time4loop*(self.loopCounter-1))/self.timeTotal
         else:
             self.progress = 0.
         self.updateProgress.emit(self.progress)
+        logging.getLogger('').debug(self.taskName + " <" + self.name + "> regions: " + str(self.regions) )
+        logging.getLogger('').debug(self.taskName + " <" + self.name + "> loops: %d/%d "%(self.loopCounter, self.loops) )
         
             
     def start(self):        
@@ -112,7 +113,7 @@ class DummyGaussScanTask(QtCore.QObject):
             if self.isStopped: 
                 # Resume
                 QtCore.QMetaObject.invokeMethod(self.taskWorker, "resume", QtCore.Qt.DirectConnection)
-                print self.name + " resumed"
+                logging.getLogger('').info(self.taskName + " <" + self.name + "> resumed")
             else: 
                 # Start the worker here
                 self.isEditable = False
@@ -121,7 +122,7 @@ class DummyGaussScanTask(QtCore.QObject):
                 self.taskWorker.tppList = self.tppList
                 self.taskWorker.posList = self.posList
                 self.taskThread.start()
-                print self.name + " (%d/%d) started"%(self.loopCounter, self.loops)   
+                logging.getLogger('').info(self.taskName + " <" + self.name + "> (%d/%d) started"%(self.loopCounter, self.loops) )  
                 
             self.isStopped = False
             self.isRunning = True
@@ -153,24 +154,25 @@ class DummyGaussScanTask(QtCore.QObject):
         QtCore.QMetaObject.invokeMethod(self.taskWorker, "stop", QtCore.Qt.DirectConnection)
         self.isStopped = True
         self.isRunning = False
+        logging.getLogger('').debug(self.taskName + " <" + self.name + "> stopped")
     
     def update(self, i, v):    
         self.currentPoint = i
         self.progress = 100.*(sum(self.tppList[:i+1]) + self.time4loop*(self.loopCounter-1))/self.timeTotal
         self.updateProgress.emit(self.progress)
-        self.updateData.emit(self.posList[i], v)
+        self.updateData.emit([self.posList[i], v])
         
-    def finish(self):
+    def finish(self):        
+        logging.getLogger('').info(self.taskName + " <" + self.name + "> (%d/%d) finished"%(self.loopCounter, self.loops) )  
         if self.loopCounter < self.loops:
             self.start()
-        else:
-            print self.name + " finished"        
+        else: 
             self.isStopped = False
             self.isRunning = False
             self.isFinished = True
             self.isEditable = True
             self.finished.emit()
-
+          
             
             
             
@@ -232,17 +234,17 @@ class DummyEXAFSTask(QtCore.QObject):
     It has a worker that runs in a separate thread
     '''
     updateProgress = QtCore.pyqtSignal(float)
-    updateData = QtCore.pyqtSignal(float, float)
+    updateData = QtCore.pyqtSignal(list)
     clearData = QtCore.pyqtSignal()
     finished = QtCore.pyqtSignal()
     isEditable = True
     def __init__(self, name=None, parent=None, 
-                 regions = [[8979, -200, 10, 0.5], 
-                            [8979, -50, 1, 0.5], 
-                            [8979, -30, 0.2, 0.5], 
-                            [8979, 50, 1, 0.5],                            
-                            [8979, 100, 0.05, 0.5, 1], 
-                            [8979, 1200]], 
+                 regions = [[8979, -200, 10, 0.05], 
+                            [8979, -50, 1, 0.05], 
+                            [8979, -30, 0.2, 0.05], 
+                            [8979, 50, 1, 0.05],                            
+                            [8979, 100, 0.05, 0.05, 1], 
+                            [8979, 500]], 
                  logic = {"Autostart" : True,
                           "Use NEXUS" : False, 
                           "Use Encoder" : False, 
@@ -272,7 +274,7 @@ class DummyEXAFSTask(QtCore.QObject):
         self.taskThread.finished.connect(self.finish)
         self.taskWorker.updateData.connect(self.update)
         
-        print self.name + " created"
+        logging.getLogger('').debug(self.taskName + " <" + self.name + "> created")
         self.recalculate()
 
         
@@ -292,14 +294,14 @@ class DummyEXAFSTask(QtCore.QObject):
             
         self.stepsTotal = len(self.posList) 
         self.time4loop = sum(self.tppList)
-        print self.posList
-        print self.tppList
         self.timeTotal = self.time4loop*self.loops  
         if self.timeTotal != 0 and self.loopCounter != 0:
             self.progress = 100.*(sum(self.tppList[:self.currentPoint+1]) + self.time4loop*(self.loopCounter-1))/self.timeTotal
         else:
             self.progress = 0.
         self.updateProgress.emit(self.progress)
+        logging.getLogger('').debug(self.taskName + " <" + self.name + "> regions: " + str(self.regions) )
+        logging.getLogger('').debug(self.taskName + " <" + self.name + "> loops: %d/%d "%(self.loopCounter, self.loops) )
         
             
     def start(self):        
@@ -307,7 +309,7 @@ class DummyEXAFSTask(QtCore.QObject):
             if self.isStopped: 
                 # Resume
                 QtCore.QMetaObject.invokeMethod(self.taskWorker, "resume", QtCore.Qt.DirectConnection)
-                print self.name + " resumed"
+                logging.getLogger('').debug(self.taskName + " <" + self.name + "> resumed")
             else: 
                 # Start the worker here
                 self.isEditable = False
@@ -316,7 +318,7 @@ class DummyEXAFSTask(QtCore.QObject):
                 self.taskWorker.tppList = self.tppList
                 self.taskWorker.posList = self.posList
                 self.taskThread.start()
-                print self.name + " (%d/%d) started"%(self.loopCounter, self.loops)   
+                logging.getLogger('').info(self.taskName + " <" + self.name + "> (%d/%d) started"%(self.loopCounter, self.loops) ) 
                 
             self.isStopped = False
             self.isRunning = True
@@ -348,18 +350,19 @@ class DummyEXAFSTask(QtCore.QObject):
         QtCore.QMetaObject.invokeMethod(self.taskWorker, "stop", QtCore.Qt.DirectConnection)
         self.isStopped = True
         self.isRunning = False
+        logging.getLogger('').debug(self.taskName + " <" + self.name + "> stopped")
     
     def update(self, i, v):    
         self.currentPoint = i
         self.progress = 100.*(sum(self.tppList[:i+1]) + self.time4loop*(self.loopCounter-1))/self.timeTotal
         self.updateProgress.emit(self.progress)
-        self.updateData.emit(self.posList[i], v)
+        self.updateData.emit([self.posList[i], v])
         
     def finish(self):
         if self.loopCounter < self.loops:
             self.start()
         else:
-            print self.name + " finished"        
+            logging.getLogger('').info(self.taskName + " <" + self.name + "> (%d/%d) finished"%(self.loopCounter, self.loops) )        
             self.isStopped = False
             self.isRunning = False
             self.isFinished = True

@@ -10,26 +10,27 @@ class MonitorWidget(FigureCanvas):
         self.ax1.set_xlabel("Position/Energy")        
         self.datax = []
         self.datay = []
-        self.line, = self.ax1.plot([], [], "ro-", lw = 2, label='data')
+        self.line, = self.ax1.plot(self.datax, self.datay, "ro-", lw = 2, label='data')
         self.fig.tight_layout()
         self.fig.canvas.draw()
         
-    def newData(self, data):
+    def updateData(self, data):
         if data:
-            self.datax += [data[0]]
-            self.datay += [data[1]]
+            self.datax += list([data[0]])
+            self.datay += list([data[1]])
             self.replot()
             
             
-    def replot(self):
-        self.line.set_data(self.datax, self.datay) 
+    def replot(self):        
         xmin, xmax = [min(self.datax) - 0.05*(max(self.datax) - min(self.datax)), max(self.datax) + 0.05*(max(self.datax) - min(self.datax))]
         ymin, ymax = [min(self.datay) - 0.05*(max(self.datay) - min(self.datay)), max(self.datay) + 0.05*(max(self.datay) - min(self.datay))]
-        self.ax1.axis([xmin, xmax, ymin, ymax])
+        if xmin!= xmax or ymin!=ymax:
+            self.ax1.axis([xmin, xmax, ymin, ymax])
+        self.line.set_data(self.datax, self.datay) 
         self.ax1.legend(loc = "best").draw_frame(False)
         self.fig.canvas.draw()    
     
-    def clear(self):
+    def clearData(self):
         self.datax = []
         self.datay = []
        
