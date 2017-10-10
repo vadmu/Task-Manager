@@ -7,16 +7,14 @@ import sys
 import numpy as np
 from PyQt4 import QtGui, QtCore
 from tasks.dummy import DummyGaussScanTask, DummyEXAFSTask
-from tasks.stepscan import StepScanTask
-from tasks.stepscan_test import EnergyStepScanTask
-from tasks.contscan import ContScanTask
+
 from inspect import getargspec, isclass
 #from monitor.MonitorWidget import MonitorWidget
 #from monitor.MonitorWidgetQwt import MonitorWidget
 from monitor.MonitorWidgetPQG import MonitorWidget
 import logging
 
-tasksAvailable = [DummyGaussScanTask, DummyEXAFSTask, ContScanTask, StepScanTask, EnergyStepScanTask]
+tasksAvailable = [DummyGaussScanTask, DummyEXAFSTask]
 
 PROGRESS_COLUMN_INDEX = 3
 LOOP_COLUMN_INDEX = 2
