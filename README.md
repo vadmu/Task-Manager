@@ -1,5 +1,9 @@
-# TaskManager v0.1
+# TaskManager v0.2
 User interface for Task Management
+
+### Version 0.2
+ * new Monitor with pyqtgraph
+ * bug fixes
 
 ### Version 0.1
 * bug fixes
