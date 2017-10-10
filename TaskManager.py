@@ -1,21 +1,40 @@
+#!/usr/bin/env python2.7
+# -*- coding: utf-8 -*-
+"""
+@author: VM
+"""
 import sys
 import numpy as np
 from PyQt4 import QtGui, QtCore
 from tasks.dummy import DummyGaussScanTask, DummyEXAFSTask
+from tasks.stepscan import StepScanTask
+from tasks.stepscan_test import EnergyStepScanTask
+from tasks.contscan import ContScanTask
 from inspect import getargspec, isclass
-from monitor.MonitorWidget import MonitorWidget
+#from monitor.MonitorWidget import MonitorWidget
+#from monitor.MonitorWidgetQwt import MonitorWidget
+from monitor.MonitorWidgetPQG import MonitorWidget
 import logging
 
-tasksAvailable = [DummyGaussScanTask, DummyEXAFSTask]
-#tasksAvailable = sorted([key for key in locals().keys() if ("<class \'tasks." in str(locals()[key]))])
+tasksAvailable = [DummyGaussScanTask, DummyEXAFSTask, ContScanTask, StepScanTask, EnergyStepScanTask]
+
 PROGRESS_COLUMN_INDEX = 3
 LOOP_COLUMN_INDEX = 2
 NAME_COLUMN_INDEX = 1
 
+
+#from PyQt4.QtCore import QT_VERSION_STR
+#from PyQt4.pyqtconfig import Configuration
+#print("Qt version:", QT_VERSION_STR)
+#cfg = Configuration()
+#print("SIP version:", cfg.sip_version_str)
+#print("PyQt version:", cfg.pyqt_version_str)
+#print (sys.version) 
+
 # make logger
 logging.basicConfig(format ='%(levelname)-8s [%(asctime)-15s] %(message)s', 
                     datefmt='%Y-%m-%d %H:%M:%S',
-                    level = logging.DEBUG, 
+                    level = logging.DEBUG,
                     filename = 'testlog.log')
 
 console = logging.StreamHandler()
@@ -229,7 +248,11 @@ class TaskTableModel(QtCore.QAbstractTableModel):
         self.isPaused = True
         self.isRunning = False
         if self.currentTask < len(self.taskList):
-            self.taskList[self.currentTask].pause()        
+            self.taskList[self.currentTask].pause()  
+        # special hack for continuous scans
+        if not self.taskList[self.currentTask].isPaused:
+            self.isPaused = False
+            self.isRunning = True
         
 
     def finish(self):
@@ -257,13 +280,18 @@ class ProgressDelegate(QtGui.QStyledItemDelegate):
 
     def paint(self, painter, option, index):
 #        if (index.column() == PROGRESS_COLUMN_INDEX):
-        progress = index.data()            
+#            progress = type(index.data())
+        if type(index.data()) == QtCore.QVariant:
+            progress = index.data().toPyObject()
+        else:
+            progress = index.data()
         progressBarOption = QtGui.QStyleOptionProgressBar()
         progressBarOption.rect = option.rect
         progressBarOption.minimum = 0
         progressBarOption.maximum = 100
         progressBarOption.progress = progress
         progressBarOption.text = "%.2f%%"%progress
+#            progressBarOption.text = "%d%%"%progress
         progressBarOption.textVisible = True            
         QtGui.QApplication.style().drawControl(QtGui.QStyle.CE_ProgressBar, progressBarOption, painter)
 #        else:
@@ -369,8 +397,9 @@ class ConfigRegionsModel(QtCore.QAbstractTableModel):
             self.regions[index.row()][index.column()] = value            
             if not isclass(self.task):
                 self.task.recalculate()
-#            self.dataChanged.emit(index, index) 
             self.layoutChanged.emit()
+            self.dataChanged.emit(index, index) 
+#            
             return True
         return False   
 
@@ -452,9 +481,9 @@ class TaskConfig(QtGui.QWidget):
         self.regionsTable = QtGui.QTableView()
         self.logicList = QtGui.QListView()
         self.regionsTable.setSelectionMode(QtGui.QAbstractItemView.SingleSelection) 
-        self.regionsTable.horizontalHeader().setResizeMode(QtGui.QHeaderView.Stretch)
         self.regionsTable.setItemDelegate(NumberFormatDelegate(self.regionsTable))
 #        self.regionsTable.horizontalHeader().setResizeMode(QtGui.QHeaderView.ResizeToContents)
+        self.regionsTable.horizontalHeader().setResizeMode(QtGui.QHeaderView.Stretch)
  
         self.regionsModel = ConfigRegionsModel()
         self.logicModel = ConfigLogicModel()
@@ -510,7 +539,7 @@ class MainW(QtGui.QWidget):
     def setupLayout(self):
                 
         self.plotter = MonitorWidget()
-        self.plotter.setSizePolicy(QtGui.QSizePolicy(QtGui.QSizePolicy.MinimumExpanding, QtGui.QSizePolicy.MinimumExpanding))        
+#        self.plotter.setSizePolicy(QtGui.QSizePolicy(QtGui.QSizePolicy.MinimumExpanding, QtGui.QSizePolicy.MinimumExpanding))        
         self.ttModel = TaskTableModel(plotter = self.plotter)        
         self.ttView = QtGui.QTableView()
         self.ttView.setItemDelegateForColumn(PROGRESS_COLUMN_INDEX, ProgressDelegate(self.ttView))
@@ -520,7 +549,7 @@ class MainW(QtGui.QWidget):
         self.ttView.horizontalHeader().setResizeMode(QtGui.QHeaderView.Stretch) 
         self.ttView.horizontalHeader().setHighlightSections(False)
         self.ttView.setModel(self.ttModel)
-        self.ttView.selectionModel().selectionChanged.connect(self.configureTask)
+        
         
         self.statusLayout = QtGui.QHBoxLayout()
         self.totalBar = floatProgressBar()  
@@ -573,11 +602,12 @@ class MainW(QtGui.QWidget):
         self.btnRemove.clicked.connect(self.removeTask)
         self.btnCopy.clicked.connect(self.copyTask)
         self.btnAdd.clicked.connect(self.startWizard)
+        self.ttView.selectionModel().selectionChanged.connect(self.configureTask)
         self.ttModel.updateTotalProgress.connect(self.updateProgressBarState)
         self.ttModel.updateTimeLeft.connect(self.updateTimeLeftState)
         self.ttModel.tasksFinished.connect(self.setupButtons)
-        self.config.regionsModel.dataChanged.connect(self.ttModel.layoutChanged)
-        self.config.logicModel.dataChanged.connect(self.ttModel.layoutChanged)
+        self.config.regionsModel.dataChanged.connect(self.ttModel.updateTask)
+        self.config.logicModel.dataChanged.connect(self.ttModel.updateTask)
 
         
     def start(self):                
@@ -767,7 +797,6 @@ app = QtGui.QApplication(sys.argv)
 mw = MainW()
 mw.setAttribute(QtCore.Qt.WA_DeleteOnClose) # QObject::startTimer: QTimer can only be used with threads started with QThread
 mw.setWindowTitle('Task Manager')
-
 mw.setMinimumSize(800, 600)   
 mw.setGeometry(100, 50, 1600, 900)
 mw.show()
