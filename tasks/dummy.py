@@ -54,7 +54,9 @@ class DummyGaussScanTask(QtCore.QObject):
     def __init__(self, name=None, parent = None, 
                  regions = [[100, 2, 0.05],
                             [200, None, None]],
-                 logic = {"Autostart" : True           
+                 logic = {"Autostart" : True,
+                          "Save to NEXUS file (*.nxs)" : True,
+                          "Save to ASCII file (*.dat)" : True
                           }):
         QtCore.QObject.__init__(self, parent)
         self.name = name
@@ -102,6 +104,7 @@ class DummyGaussScanTask(QtCore.QObject):
         self.timeTotal = self.time4loop*self.loops  
         if self.timeTotal != 0 and self.loopCounter != 0:
             self.progress = 100.*(sum(self.tppList[:self.currentPoint+1]) + self.time4loop*(self.loopCounter-1))/self.timeTotal
+#            self.progress = 100.*sum(self.tppList[:self.currentPoint+1])/self.time4loop
         else:
             self.progress = 0.
         self.updateProgress.emit(self.progress)
@@ -160,8 +163,35 @@ class DummyGaussScanTask(QtCore.QObject):
     def update(self, i, v):    
         self.currentPoint = i
         self.progress = 100.*(sum(self.tppList[:i+1]) + self.time4loop*(self.loopCounter-1))/self.timeTotal
+#        self.progress = 100.*sum(self.tppList[:i+1])/self.time4loop
         self.updateProgress.emit(self.progress)
-        self.updateData.emit([self.posList[i], v])
+        self.updateData.emit([{
+                               "name" : "Dummy",
+                               "addr" : "*****",
+                               "pos"  : self.posList[i]
+                              },                               
+                              {
+                               "name" : "i0",
+                               "type" : "0d",
+                               "value": v
+                              },
+                              {
+                               "name" : "i1",
+                               "type" : "0d",
+                               "value": 0.5*v
+                              },
+                              {
+                               "name" : "mu01",
+                               "type" : "mu",
+                               "value": np.sin(10.*v)
+                              },
+                              {
+                               "name" : "lambda1",
+                               "type" : "2d",
+                               "value": np.random.randint(1024, size=(1000, 500))
+                              }                              
+                             ]
+                            )
         
     def finish(self):        
         logging.getLogger('').info(self.taskName + " <" + self.name + "> (%d/%d) finished"%(self.loopCounter, self.loops) )  
@@ -201,10 +231,10 @@ class DummyEXAFSScanTaskWorker(QtCore.QObject):
     
     def exafsCu(self, e, e0):
         if e > e0:
-            exafs = np.sin(e-e0)/(e-e0)
+            exafs = np.sin(0.5*(e-e0))/(e-e0)
+            return 1./(1 + np.exp(-(e-e0)/0.125)) - 1e-4*e + exafs
         else:
-            exafs = 0
-        return 1./(1 + np.exp(-(e-e0)/0.125)) - 1e-4*e + exafs
+            return -1e-4*e
    
     def process(self):
         for i in range(len(self.posList)):
@@ -247,6 +277,8 @@ class DummyEXAFSTask(QtCore.QObject):
                             [8979, 100, 0.05, 0.05, 1], 
                             [8979, 500, None, None, None]], 
                  logic = {"Autostart" : True,
+                          "Save to NEXUS file (*.nxs)" : True,
+                          "Save to ASCII file (*.dat)" : True,
                           "Move Parallel" : False
                           }):
         QtCore.QObject.__init__(self, parent)
@@ -280,7 +312,7 @@ class DummyEXAFSTask(QtCore.QObject):
         self.posList = np.array([])
         self.tppList = np.array([])
         for i, r in enumerate(self.regions):
-            if r.count(None) == 3:
+            if r.count(None) == 5:
                 del self.regions[i]
                 continue
             elif r.count(None) == 1:
@@ -357,7 +389,33 @@ class DummyEXAFSTask(QtCore.QObject):
         self.currentPoint = i
         self.progress = 100.*(sum(self.tppList[:i+1]) + self.time4loop*(self.loopCounter-1))/self.timeTotal
         self.updateProgress.emit(self.progress)
-        self.updateData.emit([self.posList[i], v])
+        self.updateData.emit([{
+                               "name" : "Energy",
+                               "addr" : "*****",
+                               "pos"  : self.posList[i]
+                              },                               
+                              {
+                               "name" : "i0",
+                               "type" : "0d",
+                               "value": 1.
+                              },
+                              {
+                               "name" : "i1",
+                               "type" : "0d",
+                               "value": -v
+                              },
+                              {
+                               "name" : "mu01",
+                               "type" : "mu",
+                               "value": v
+                              },
+                              {
+                               "name" : "HPGe100pix",
+                               "type" : "2d",
+                               "value": np.random.randint(1024, size=(2048, 100))
+                              } 
+                             ]
+                            )
         
     def finish(self):
         if self.loopCounter < self.loops:
@@ -369,3 +427,4 @@ class DummyEXAFSTask(QtCore.QObject):
             self.isFinished = True
             self.isEditable = True
             self.finished.emit()
+
