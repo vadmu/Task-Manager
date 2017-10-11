@@ -108,7 +108,9 @@ class TaskTableModel(QtCore.QAbstractTableModel):
         if role == QtCore.Qt.EditRole:
             task = self.taskList[index.row()]
             if index.column() == LOOP_COLUMN_INDEX:
-                return task.loops   
+                return task.loops 
+            if index.column() == NAME_COLUMN_INDEX:                   
+                return task.name
     
     def headerData(self, sect, orient, role):
         if (role == QtCore.Qt.DisplayRole) and (orient == QtCore.Qt.Horizontal):
